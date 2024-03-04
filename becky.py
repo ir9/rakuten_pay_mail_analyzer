@@ -61,12 +61,13 @@ def decode_header(msg:Message, key:str):
 TRANS_DECODE_MAP:dict[str, Callable[[Any], bytes]] = {
     'base64':           base64.b64decode,
     'quoted-printable': quopri.decodestring,
+    '7bit':             quopri.decodestring,
 }
 
 def get_mail_body(msg:Message):
     charset        = msg.get_content_charset()
     trans_encoding = decode_header(msg, 'Content-Transfer-Encoding')
-    print(f"{charset} / {trans_encoding}")
+    # print(f"{charset} / {trans_encoding}")
     raw_body = msg.get_payload()
 
     body = TRANS_DECODE_MAP[trans_encoding](raw_body)
@@ -75,19 +76,33 @@ def get_mail_body(msg:Message):
 def content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'
 
+def _dump_mail(mail_body:str, msgid:str, filename:str, i:int):
+    # remove invalid chars in windows path
+    for c in '\/:*?"<>|':
+        msgid = msgid.replace(c, '')
+
+    dump = f'{msgid}_{i}.txt'
+    with open(dump, 'w', encoding='utf-8') as h:
+        print(filename, file=h)
+        print(msgid, file=h)
+        print(file=h)
+        print(mail_body, file=h, end='')
+
 def get_rakuten_pay_mail_first(msg:Message, filename:str):
     msgid = decode_header(msg, 'Message-ID')
-    for part in filter(content_type_is_text_plain, msg.walk()):
+    for i, part in enumerate(filter(content_type_is_text_plain, msg.walk())):
+        mail_body = 'decode failed...'
         try:
             mail_body = get_mail_body(part)
-            # _dump_mail(mail_body, "dump.txt")
             return rakuten_pay_mail_parser.parse(mail_body)
         except Exception as ex:
+            _dump_mail(mail_body, msgid, filename, i)
             w(f'unexcepted rakuten pay mail format(1): {filename} / {msgid}, {ex}, {traceback.format_exc()}')
             continue
 
     w(f'unexcepted rakuten pay mail format(2): {filename} / {msgid}, {traceback.format_exc()}')
     return None
+
 
 def get_rakuten_pay_mails(mail_box_path:str):
     search_path = os.path.join(mail_box_path, "*.bkl")
@@ -104,7 +119,8 @@ def get_rakuten_pay_mails(mail_box_path:str):
 
             mail = get_rakuten_pay_mail_first(msg, bkl_file)
             if mail:
-                yield mail
+                msgid = decode_header(msg, 'Message-ID')
+                yield (mail, msgid)
 
 
 def get_cli_option():
@@ -117,8 +133,8 @@ def main():
     opt = get_cli_option()
     mail_box_path = opt.mail_box_path
     mails = list(get_rakuten_pay_mails(mail_box_path))
-    for mail in mails:
-        print(','.join(map(str, [mail.datetime, mail.total, mail.use_point, mail.store_name])))
+    for mail, msgid in mails:
+        print(','.join(map(str, [mail.datetime, mail.total, mail.use_point, mail.use_cash, mail.store_name, msgid])))
 
 if __name__ == '__main__':
     main()
