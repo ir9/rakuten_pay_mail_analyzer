@@ -1,5 +1,6 @@
 from typing import *
 import sys
+import os.path
 import glob
 import argparse
 import traceback
@@ -10,6 +11,10 @@ import email.header
 from email.message import Message
 
 import rakuten_pay_mail_parser
+
+def _dump_mail(msg:str, filename:str):
+    with open(filename, "a", encoding='utf-8') as h:
+        print(msg, file=h, end='')
 
 def w(msg:str):
     print(f"{msg}", file=sys.stderr)
@@ -75,16 +80,18 @@ def get_rakuten_pay_mail_first(msg:Message, filename:str):
     for part in filter(content_type_is_text_plain, msg.walk()):
         try:
             mail_body = get_mail_body(part)
+            # _dump_mail(mail_body, "dump.txt")
             return rakuten_pay_mail_parser.parse(mail_body)
         except Exception as ex:
             w(f'unexcepted rakuten pay mail format(1): {filename} / {msgid}, {ex}, {traceback.format_exc()}')
             continue
 
-    w(f'unexcepted rakuten pay mail format(2): {filename} / {msgid}, {ex}, {traceback.format_exc()}')
+    w(f'unexcepted rakuten pay mail format(2): {filename} / {msgid}, {traceback.format_exc()}')
     return None
 
 def get_rakuten_pay_mails(mail_box_path:str):
-    for bkl_file in glob.glob(mail_box_path):
+    search_path = os.path.join(mail_box_path, "*.bkl")
+    for bkl_file in glob.glob(search_path):
         for mail in split_becky_mailfile(bkl_file):
             msg = email.message_from_bytes(mail)
             subject = decode_header(msg, 'subject')
@@ -102,16 +109,16 @@ def get_rakuten_pay_mails(mail_box_path:str):
 
 def get_cli_option():
     p = argparse.ArgumentParser()
-    p.add_argument('mail_box_path', required=True, help='specify the directory to *.bkl files.')
+    p.add_argument('mail_box_path', help='specify the directory to *.bkl files.')
     return p.parse_args()
 
 
 def main():
     opt = get_cli_option()
-    mail_box_path = opt.mail_boxy_path
+    mail_box_path = opt.mail_box_path
     mails = list(get_rakuten_pay_mails(mail_box_path))
     for mail in mails:
-        print(','.join([mail.datetime, mail.total, mail.store_name]))
+        print(','.join(map(str, [mail.datetime, mail.total, mail.use_point, mail.store_name])))
 
 if __name__ == '__main__':
     main()
