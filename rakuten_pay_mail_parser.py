@@ -2,6 +2,7 @@ from typing import *
 import re
 import sys
 import functools
+import datetime as dt
 
 import bs4
 import dateutil.parser
@@ -16,7 +17,7 @@ RE_IS_HTML     = re.compile('<html.*?>', re.I)
 RE_PRE_ELEMENT = re.compile('<pre.*?>', re.I)
 
 def _mk_re(key: str):
-    return re.compile(r'\s+%s\s+(.+)' % key)
+    return re.compile(rf'\s+{key}\s+(.+)')
 
 def _normalize_yen(s: str):
     REMOVE_CHARS = ',円 '
@@ -28,32 +29,43 @@ def _normalize_datetime(s: str):
     s = RE_REMOVE_WEEK.sub('', s)
     return dateutil.parser.parse(s)
 
-class RakutenPayHtmlMail:
+class RakutenPayMail:
+    datetime:Optional[dt.datetime] = None
+    receipt_no:Optional[str] = None
+    store_name:Optional[str] = None
+    store_tel:Optional[str]  = None
+    use_point:Optional[int]  = None
+    '利用したポイント'
+    use_cash:Optional[int]  = None
+    '利用したcache'
+    total:Optional[int]      = None
+    '支払総額'
+
     def __init__(self):
-        self.datetime   = None
-        self.receipt_no = None
-        self.store_name = None
-        self.store_tel  = None
-        self.use_point  = None
-        self.total      = None
+        pass
 
     def __str__(self):
         return f"DateTime: {self.datetime} / Total: {self.total} / Point:{self.use_point} / ReceiptNo: {self.receipt_no} / Store: {self.store_name} / Tel: {self.store_tel}"
 
-class RakutenPayPlainText(RakutenPayHtmlMail):
+class RakutenPayPlainText(RakutenPayMail):
     RE_DATETIME   = _mk_re("ご利用日時")
     RE_RECEIPT_NO = _mk_re("伝票番号")
     RE_STORE_NAME = _mk_re("ご利用店舗")
     RE_STORE_TEL  = _mk_re("電話番号")
     RE_TOTAL      = _mk_re("決済総額")
-    RE_PAY_POINT  = _mk_re("ポイント／キャッシュ利用")
-    RE_PAY_CASH   = _mk_re("お支払金額")
+
+    # Legacy
+    RE_PAY_CASH_L = _mk_re("ポイント／キャッシュ利用")
+
+    # current
+    RE_PAY_POINT  = _mk_re("ポイント")
+    RE_PAY_CASH   = _mk_re("楽天キャッシュ")
 
     def __init__(self, mail_body: str):
         super().__init__()
 
-        S = RakutenPayPlainText
-        R = self._getRecord
+        S  = RakutenPayPlainText
+        R  = self._get_record
         NY = _normalize_yen
         ND = _normalize_datetime
 
@@ -62,10 +74,18 @@ class RakutenPayPlainText(RakutenPayHtmlMail):
         self.receipt_no = R(lines, S.RE_RECEIPT_NO)
         self.store_name = R(lines, S.RE_STORE_NAME)
         self.store_tel  = R(lines, S.RE_STORE_TEL)
-        self.use_point  = NY(R(lines, S.RE_PAY_POINT))
-        self.total      = NY(R(lines, S.RE_TOTAL))
 
-    def _getRecord(self, lines, regex: re.Pattern):
+        legacy_mail = self._is_legacy_mail(lines)
+        if legacy_mail:
+            self.use_point  = 0
+            self.use_cash  = NY(R(lines, S.RE_PAY_CASH_L))
+            self.total      = NY(R(lines, S.RE_TOTAL))
+        else:
+            self.use_point  = int(R(lines, S.RE_PAY_POINT))
+            self.use_cash  = NY(R(lines, S.RE_PAY_CASH))
+            self.total      = NY(R(lines, S.RE_TOTAL))
+
+    def _get_record(self, lines, regex: re.Pattern):
         for line in lines:
             m = regex.search(line)
             if m:
@@ -73,7 +93,11 @@ class RakutenPayPlainText(RakutenPayHtmlMail):
         w(f'PlainText:element not found:{regex}')
         return None
 
-class RakutenPayHtmlMailLegacy(RakutenPayHtmlMail):
+    def _is_legacy_mail(self, lines:List[str]):
+        search = RakutenPayPlainText.RE_PAY_CASH_L.search
+        return any(search(line) for line in lines)
+
+class RakutenPayMailLegacy(RakutenPayMail):
     RE_BODY_EXTRACTOR = re.compile(r"<pre>(.+?)</pre>", re.S)
 
     def __init__(self, mailBody: str):
@@ -86,11 +110,11 @@ class RakutenPayHtmlMailLegacy(RakutenPayHtmlMail):
         self.receipt_no = self._getValue('注文番号')
         self.store_name = self._getValue('□利用店舗')
         self.store_tel  = ''
-        self.use_point  = NY(self._getValue('ポイント利用').replace('ポイント）', ''))
+        self.use_cash   = NY(self._getValue('ポイント利用').replace('ポイント）', ''))
         self.total      = NY(self._getValue('合計金額').replace('（円）', ''))
 
     def _extractBody(self, mailBody: str):
-        S = RakutenPayHtmlMailLegacy
+        S = RakutenPayMailLegacy
         m = S.RE_BODY_EXTRACTOR.search(mailBody)
         body = m.group(1)
         return body.split('\n')
@@ -102,7 +126,7 @@ class RakutenPayHtmlMailLegacy(RakutenPayHtmlMail):
         value = kv[1].strip()
         return value
 
-class RakutenPayHtmlMailCurrent(RakutenPayHtmlMail):
+class RakutenPayMailCurrent(RakutenPayMail):
     def __init__(self, mailBody: str):
         super().__init__()
         NY = _normalize_yen
@@ -113,7 +137,7 @@ class RakutenPayHtmlMailCurrent(RakutenPayHtmlMail):
         self.receipt_no = self._getNextSiblingText('ご注文番号：')
         self.store_name = self._getNextSiblingText('ご利用サイト：')
         self.store_tel  = ''
-        self.use_point  = NY(self._getRightText('ポイント(/キャッシュ)?利用：'))
+        self.use_cash   = NY(self._getRightText('ポイント(/キャッシュ)?利用：'))
         self.total      = NY(self._getRightText('小計：'))
 
     def _getNextSiblingText(self, prevKey: str):
@@ -136,7 +160,7 @@ def is_rakuten_pay_mail(from_:str, subject:str):
         return True
     return False
 
-def parse(mail_body:str) -> RakutenPayHtmlMail:
+def parse(mail_body:str) -> RakutenPayMail:
     """
     Raises:
         throw various exceptions....
@@ -147,9 +171,9 @@ def parse(mail_body:str) -> RakutenPayHtmlMail:
         #    e(f'{filePath} / ignore...')
         #    wrap = ''
         if RE_PRE_ELEMENT.search(mail_body):
-            return RakutenPayHtmlMailLegacy(mail_body)
+            return RakutenPayMailLegacy(mail_body)
         else:
-            return RakutenPayHtmlMailCurrent(mail_body)
+            return RakutenPayMailCurrent(mail_body)
     else:
         return RakutenPayPlainText(mail_body)
 
