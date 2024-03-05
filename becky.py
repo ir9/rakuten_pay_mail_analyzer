@@ -50,7 +50,7 @@ def decode_header(msg:Message, key:str):
         if isinstance(body, str):
             return body
         else:
-            return util.decode(body, encode or 'cp932')
+            return util.decode(body, encode)
 
     header = msg[key]
     if header is None:
@@ -107,15 +107,15 @@ def get_rakuten_pay_mail_first(msg:Message, filename:str):
 
 def get_rakuten_pay_mails(mail_box_path:str):
     for bmf_file in glob.glob('**/*.bmf', root_dir=mail_box_path, recursive=True):
-        print('.', file=sys.stderr, end='')
+        print('.', file=sys.stderr, end='', flush=True)
         bmf_path = os.path.join(mail_box_path, bmf_file)
         msgid = None
         try:
             for mail in split_becky_mailfile(bmf_path):
                 msg     = email.message_from_bytes(mail)
-                msgid   = decode_header(msg, 'Message-ID')
-                subject = decode_header(msg, 'subject')
-                from_   = decode_header(msg, 'from')
+                msgid   = decode_header(msg, 'Message-ID') or ''
+                subject = decode_header(msg, 'subject')    or ''
+                from_   = decode_header(msg, 'from')       or ''
                 # print(f"{from_} / {subject}")
                 if not rakuten_pay_mail_parser.is_rakuten_pay_mail(from_, subject):
                     continue
