@@ -163,6 +163,7 @@ class UnexcpectedRakutenPayMailException(Exception):
         self.mail_body:str = None
         self.from_:str     = None
         self.subject:str   = None
+        self.msgid:str     = None
         self.email:Message = None
 
 #=== internal ===
@@ -211,6 +212,11 @@ def _content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'
 
 def _get_rakuten_pay_mail_first(msg:Message):
+    """
+    Raises:
+        UnexcpectedRakutenPayMailException
+    """
+
     msgid = _decode_header(msg, 'Message-ID')
     for i, part in enumerate(filter(_content_type_is_text_plain, msg.walk())):
         mail_body = 'decode failed...'
@@ -218,12 +224,15 @@ def _get_rakuten_pay_mail_first(msg:Message):
             mail_body = _get_mail_body(part)
             return parse_mailbody(mail_body)
         except Exception as ex:
-            _dump_mail(mail_body, msgid, filename, i)
-            w(f'unexcepted rakuten pay mail format(1): {filename} / {msgid}, {ex}, {traceback.format_exc()}')
+            # _dump_mail(mail_body, msgid, filename, i)
+            # w(f'unexcepted rakuten pay mail format(1): {msgid}, {ex}, {traceback.format_exc()}')
             continue
 
-    w(f'unexcepted rakuten pay mail format(2): {filename} / {msgid}, {traceback.format_exc()}')
-    return None
+    w(f'unexcepted rakuten pay mail format(2): {msgid}')
+    ex = UnexcpectedRakutenPayMailException()
+    ex.msgid = msgid
+    ex.email = msg
+    raise ex
 
 #=== api ===
 def is_rakuten_pay_mail(from_:str, subject:str):
@@ -237,17 +246,27 @@ def is_rakuten_pay_mail(from_:str, subject:str):
     return False
 
 def parse_email(mail:Message):
-    msgid   = _decode_header(mail, 'Message-ID')
+    """
+    Raises:
+        UnexcpectedRakutenPayMailException
+    """
+
     subject = _decode_header(mail, 'subject')
     from_   = _decode_header(mail, 'from')
     # print(f"{from_} / {subject}")
     if not is_rakuten_pay_mail(from_, subject):
         return None
     if not mail.is_multipart():
-        return None # 楽天Payのmailは必ず multipart
+        ex = UnexcpectedRakutenPayMailException()
+        raise ex
 
-    pay_mail = _get_rakuten_pay_mail_first(mail)
-    return pay_mail
+    try:
+        pay_mail = _get_rakuten_pay_mail_first(mail)
+        return pay_mail
+    except UnexcpectedRakutenPayMailException as ex:
+        ex.from_   = from_
+        ex.subject = subject
+        raise
 
 def parse_str(mail_body:str, from_:str, subject:str):
     if not is_rakuten_pay_mail(from_, subject):
@@ -273,7 +292,7 @@ def parse_mailbody(mail_body:str) -> RakutenPayMail:
 
 def _main():
     mail_body = ''.join(sys.stdin)
-    result = parse(mail_body)
+    result = parse_mailbody(mail_body)
     print(result)
 
 if __name__ == '__main__':
