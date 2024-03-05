@@ -21,10 +21,7 @@ if sys.platform == 'win32':
     decode_iso2022jp = _decode_iso2022jp_win
 
 DECODER_MEMO = {}
-def decode(b:bytes, encoding:str):
-    if encoding is None or encoding == 'unknown-8bit':
-        encoding = 'cp932'
-
+def decode(b:bytes, encoding:str, ignore_error=False):
     name = DECODER_MEMO.get(encoding)
     if name is None:
         c = codecs.lookup(encoding)
@@ -39,5 +36,5 @@ def decode(b:bytes, encoding:str):
     if name.startswith('shift_jis'):
         # shift_jis_2004, shift_jisx0213
         encoding = 'cp932'
-    return b.decode(encoding)
+    return b.decode(encoding, errors='ignore' if ignore_error else 'strict')
 

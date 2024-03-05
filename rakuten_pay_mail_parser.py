@@ -15,7 +15,7 @@ import dateutil.parser
 import util
 
 def w(msg):
-    print(f"{msg}", sys.stderr)
+    print(f"{msg}", file=sys.stderr, flush=True)
 
 # ============================
 # rakuten mail spec
@@ -182,11 +182,18 @@ def _dump_mail(mail_body:str, msgid:str, filename:str, i:int):
 def _decode_header(msg:Message, key:str):
     def decode(seg:Tuple):
         body, encode = seg
-        # print(f"{body}:{encode}", file=sys.stderr)
+        # print(f"{body}:{encode}:{mail_charset}:{mail_content_type}", file=sys.stderr)
         if isinstance(body, str):
             return body
         else:
-            return util.decode(body, encode)
+            if encode in (None, 'unknown-8bit'):
+                encode = msg.get_content_charset() # use the mail charset
+            try:
+                return util.decode(body, encode or 'cp932')
+            except UnicodeDecodeError:
+                msgid = msg['mesasge-id']
+                w(f'Header decode error...:{msgid}:{key}')
+                return util.decode(body, encode or 'cp932', True)
 
     header = msg[key]
     if header is None:
@@ -206,7 +213,12 @@ def _get_mail_body(msg:Message):
     raw_body = msg.get_payload()
 
     body = TRANS_DECODE_MAP[trans_encoding](raw_body)
-    return util.decode(body, charset)
+    try:
+        return util.decode(body, charset)
+    except UnicodeDecodeError:
+        msgid = msg['mesasge-id']
+        w(f'mailbody decode error...:{msgid}:{charset}:{trans_encoding}')
+        return util.decode(body, charset, True)
 
 def _content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'

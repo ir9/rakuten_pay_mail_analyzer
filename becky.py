@@ -48,33 +48,33 @@ def parse_mail(bmf_path:str):
 
             pay_mail = r_pay.parse_email(mail)
             if pay_mail:
-                yield (mail_raw, msgid)
+                yield (pay_mail, msgid)
     except r_pay.UnexcpectedRakutenPayMailException:
         basename = os.path.basename(bmf_path)
         body = str(mail) + '\n\n' + traceback.format_exc()
         _dump_mail(body, f"{basename}_{msgid}.txt")
         w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
+        raise
     except Exception as ex:
         print(f"{bmf_path}:{msgid}:{ex}")
         raise
 
 def get_rakuten_pay_mails(mail_box_path:str):
     for bmf_file in glob.glob('**/*.bmf', root_dir=mail_box_path, recursive=True):
-        print('.', file=sys.stderr, end='', flush=True)
+        # print('.', file=sys.stderr, end='', flush=True)
         bmf_path = os.path.join(mail_box_path, bmf_file)
-        yield parse_mail(bmf_path)
+        yield from parse_mail(bmf_path)
 
-
+# === main ===
 def get_cli_option():
     p = argparse.ArgumentParser()
-    p.add_argument('mail_box_path', help='specify the directory to *.bkl files.')
+    p.add_argument('mail_box_path', help='specify the directory to *.bmf files.')
     return p.parse_args()
 
 def main():
     opt = get_cli_option()
     mail_box_path = opt.mail_box_path
-    mails = list(get_rakuten_pay_mails(mail_box_path))
-    for mail, msgid in mails:
+    for mail, msgid in get_rakuten_pay_mails(mail_box_path):
         print(','.join(map(str,
             [mail.datetime, mail.total, mail.use_point, mail.use_cash, mail.store_name, msgid]
         )))
