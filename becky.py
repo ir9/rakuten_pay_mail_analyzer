@@ -5,12 +5,29 @@ import os.path
 import glob
 import argparse
 import email
+import email.message
 
 import rakuten_pay_mail_parser as r_pay
 
-def _dump_mail(msg:str, filename:str):
-    with open(filename, "w", encoding='utf-8') as h:
+def _dump_mail(mail:email.message.Message, msg:str, filename:str):
+    # dump a raw mail stream
+    with open(f"{filename}.mail.txt", "wb") as h:
+        h.write(bytes(mail))
+
+    with open(f"{filename}.info.txt", "w", encoding='utf-8') as h:
         print(msg, file=h, end='')
+
+def _dump_exception(ex:r_pay.UnexcpectedRakutenPayMailException):
+    rec = [
+        f"from: {ex.from_}",
+        f"subject: {ex.subject}",
+        f"msgid: {ex.msgid}",
+        "",
+        f"{ex.mail_body}",
+        "--------",
+        traceback.format_exc(),
+    ]
+    return '\n'.join(rec)
 
 def w(msg:str):
     print(f"{msg}", file=sys.stderr)
@@ -43,22 +60,22 @@ def parse_mail(bmf_path:str):
     mail  = None
     try:
         for mail_raw in _split_becky_mailfile(bmf_path):
-            mail  = email.message_from_bytes(mail_raw)
-            msgid = r_pay._decode_header(mail, 'Message-ID')
+            try:
+                mail  = email.message_from_bytes(mail_raw)
+                msgid = r_pay._decode_header(mail, 'Message-ID')
 
-            pay_mail = r_pay.parse_email(mail)
-            if pay_mail:
-                yield (pay_mail, msgid)
-    except r_pay.UnexcpectedRakutenPayMailException:
-        basename = os.path.basename(bmf_path)
-        w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
+                pay_mail = r_pay.parse_email(mail)
+                if pay_mail:
+                    yield (pay_mail, msgid)
+            except r_pay.UnexcpectedRakutenPayMailException as ex:
+                basename = os.path.basename(bmf_path)
+                w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
 
-        # remove invalid chars in windows path
-        for c in '\/:*?"<>|':
-            msgid = msgid.replace(c, '')        
-        body = str(mail) + '\n\n' + traceback.format_exc()
-        _dump_mail(body, f"{basename}_{msgid}.txt")
-        raise
+                # remove invalid chars in windows path
+                for c in '\/:*?"<>|':
+                    msgid = msgid.replace(c, '')
+                _dump_mail(mail_raw, _dump_exception(ex), "{basename}_{msgid}")
+                continue
     except Exception as ex:
         print(f"{bmf_path}:{msgid}:{ex}")
         raise
