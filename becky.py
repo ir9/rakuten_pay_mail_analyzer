@@ -11,6 +11,7 @@ import email.header
 from email.message import Message
 
 import rakuten_pay_mail_parser
+import util
 
 def _dump_mail(msg:str, filename:str):
     with open(filename, "a", encoding='utf-8') as h:
@@ -45,11 +46,11 @@ def split_becky_mailfile(bkl_filepath:str):
 def decode_header(msg:Message, key:str):
     def decode(seg:Tuple):
         body, encode = seg
-        # print(f"{body}:{encode}")
+        # print(f"{body}:{encode}", file=sys.stderr)
         if isinstance(body, str):
             return body
         else:
-            return body.decode(encode or 'cp932')
+            return util.decode(body, encode or 'cp932')
 
     header = msg[key]
     if header is None:
@@ -71,7 +72,7 @@ def get_mail_body(msg:Message):
     raw_body = msg.get_payload()
 
     body = TRANS_DECODE_MAP[trans_encoding](raw_body)
-    return body.decode(charset)
+    return util.decode(body, charset)
 
 def content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'
@@ -105,22 +106,29 @@ def get_rakuten_pay_mail_first(msg:Message, filename:str):
 
 
 def get_rakuten_pay_mails(mail_box_path:str):
-    search_path = os.path.join(mail_box_path, "*.bkl")
-    for bkl_file in glob.glob(search_path):
-        for mail in split_becky_mailfile(bkl_file):
-            msg = email.message_from_bytes(mail)
-            subject = decode_header(msg, 'subject')
-            from_   = decode_header(msg, 'from')
-            # print(f"{from_} / {subject}")
-            if not rakuten_pay_mail_parser.is_rakuten_pay_mail(from_, subject):
-                continue
-            if not msg.is_multipart():
-                continue # 楽天Payのmailは必ず multipart
+    for bmf_file in glob.glob('**/*.bmf', root_dir=mail_box_path, recursive=True):
+        print('.', file=sys.stderr, end='')
+        bmf_path = os.path.join(mail_box_path, bmf_file)
+        msgid = None
+        try:
+            for mail in split_becky_mailfile(bmf_path):
+                msg     = email.message_from_bytes(mail)
+                msgid   = decode_header(msg, 'Message-ID')
+                subject = decode_header(msg, 'subject')
+                from_   = decode_header(msg, 'from')
+                # print(f"{from_} / {subject}")
+                if not rakuten_pay_mail_parser.is_rakuten_pay_mail(from_, subject):
+                    continue
+                if not msg.is_multipart():
+                    continue # 楽天Payのmailは必ず multipart
 
-            mail = get_rakuten_pay_mail_first(msg, bkl_file)
-            if mail:
-                msgid = decode_header(msg, 'Message-ID')
-                yield (mail, msgid)
+                mail = get_rakuten_pay_mail_first(msg, bmf_file)
+                if mail:
+                    msgid = decode_header(msg, 'Message-ID')
+                    yield (mail, msgid)
+        except Exception as ex:
+            print(f"{bmf_file}:{msgid}:{ex}")
+            raise
 
 
 def get_cli_option():

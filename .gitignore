@@ -164,3 +164,5 @@ cython_debug/
 /bs4
 /dateutil
 /python_dateutil*
+/nkf-1.0.2.dist-info
+/nkf_codecs.py
