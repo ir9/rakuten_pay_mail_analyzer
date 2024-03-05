@@ -2,10 +2,17 @@ from typing import *
 import re
 import sys
 import functools
+import traceback
+import quopri
+import base64
 import datetime as dt
+import email
+import email.header
+from   email.message import Message
 
 import bs4
 import dateutil.parser
+import util
 
 def w(msg):
     print(f"{msg}", sys.stderr)
@@ -36,7 +43,7 @@ class RakutenPayMail:
     store_tel:Optional[str]  = None
     use_point:Optional[int]  = None
     '利用したポイント'
-    use_cash:Optional[int]  = None
+    use_cash:Optional[int]   = None
     '利用したcache'
     total:Optional[int]      = None
     '支払総額'
@@ -151,16 +158,103 @@ class RakutenPayMailCurrent(RakutenPayMail):
         text = (''.join(targetNode.parent.next_sibling.next_sibling.strings)).strip()
         return text
 
-#=== api ===
+class UnexcpectedRakutenPayMailException(Exception):
+    def __init__(self):
+        self.mail_body:str = None
+        self.from_:str     = None
+        self.subject:str   = None
+        self.email:Message = None
 
+#=== internal ===
+def _dump_mail(mail_body:str, msgid:str, filename:str, i:int):
+    # remove invalid chars in windows path
+    for c in '\/:*?"<>|':
+        msgid = msgid.replace(c, '')
+
+    dump = f'{msgid}_{i}.txt'
+    with open(dump, 'w', encoding='utf-8') as h:
+        print(filename, file=h)
+        print(msgid, file=h)
+        print(file=h)
+        print(mail_body, file=h, end='')
+
+def _decode_header(msg:Message, key:str):
+    def decode(seg:Tuple):
+        body, encode = seg
+        # print(f"{body}:{encode}", file=sys.stderr)
+        if isinstance(body, str):
+            return body
+        else:
+            return util.decode(body, encode)
+
+    header = msg[key]
+    if header is None:
+        return None
+    header = email.header.decode_header(header)
+    return ''.join(map(decode, header))
+
+TRANS_DECODE_MAP:dict[str, Callable[[Any], bytes]] = {
+    'base64':           base64.b64decode,
+    'quoted-printable': quopri.decodestring,
+    '7bit':             quopri.decodestring,
+}
+def _get_mail_body(msg:Message):
+    charset        = msg.get_content_charset()
+    trans_encoding = _decode_header(msg, 'Content-Transfer-Encoding')
+    # print(f"{charset} / {trans_encoding}")
+    raw_body = msg.get_payload()
+
+    body = TRANS_DECODE_MAP[trans_encoding](raw_body)
+    return util.decode(body, charset)
+
+def _content_type_is_text_plain(part:Message):
+    return part.get_content_type() == 'text/plain'
+
+def _get_rakuten_pay_mail_first(msg:Message):
+    msgid = _decode_header(msg, 'Message-ID')
+    for i, part in enumerate(filter(_content_type_is_text_plain, msg.walk())):
+        mail_body = 'decode failed...'
+        try:
+            mail_body = _get_mail_body(part)
+            return parse_mailbody(mail_body)
+        except Exception as ex:
+            _dump_mail(mail_body, msgid, filename, i)
+            w(f'unexcepted rakuten pay mail format(1): {filename} / {msgid}, {ex}, {traceback.format_exc()}')
+            continue
+
+    w(f'unexcepted rakuten pay mail format(2): {filename} / {msgid}, {traceback.format_exc()}')
+    return None
+
+#=== api ===
 def is_rakuten_pay_mail(from_:str, subject:str):
+    from_   = from_   or ''
+    subject = subject or ''
+
     if 'order@checkout.rakuten.co.jp' in from_:
         return True
     elif ('no-reply@pay.rakuten.co.jp' in from_) and ('ご利用内容確認メール' in subject):
         return True
     return False
 
-def parse(mail_body:str) -> RakutenPayMail:
+def parse_email(mail:Message):
+    msgid   = _decode_header(mail, 'Message-ID')
+    subject = _decode_header(mail, 'subject')
+    from_   = _decode_header(mail, 'from')
+    # print(f"{from_} / {subject}")
+    if not is_rakuten_pay_mail(from_, subject):
+        return None
+    if not mail.is_multipart():
+        return None # 楽天Payのmailは必ず multipart
+
+    pay_mail = _get_rakuten_pay_mail_first(mail)
+    return pay_mail
+
+def parse_str(mail_body:str, from_:str, subject:str):
+    if not is_rakuten_pay_mail(from_, subject):
+        return None
+    return parse_mailbody(mail_body)
+
+def parse_mailbody(mail_body:str) -> RakutenPayMail:
     """
     Raises:
         throw various exceptions....
