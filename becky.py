@@ -9,7 +9,7 @@ import email
 import rakuten_pay_mail_parser as r_pay
 
 def _dump_mail(msg:str, filename:str):
-    with open(filename, "a", encoding='utf-8') as h:
+    with open(filename, "w", encoding='utf-8') as h:
         print(msg, file=h, end='')
 
 def w(msg:str):
@@ -51,9 +51,13 @@ def parse_mail(bmf_path:str):
                 yield (pay_mail, msgid)
     except r_pay.UnexcpectedRakutenPayMailException:
         basename = os.path.basename(bmf_path)
+        w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
+
+        # remove invalid chars in windows path
+        for c in '\/:*?"<>|':
+            msgid = msgid.replace(c, '')        
         body = str(mail) + '\n\n' + traceback.format_exc()
         _dump_mail(body, f"{basename}_{msgid}.txt")
-        w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
         raise
     except Exception as ex:
         print(f"{bmf_path}:{msgid}:{ex}")
