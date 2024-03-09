@@ -104,6 +104,36 @@ class RakutenPayPlainText(RakutenPayMail):
         search = RakutenPayPlainText.RE_PAY_CASH_L.search
         return any(search(line) for line in lines)
 
+#=== html mail ===
+class RakutenPayHTMLMailUtil:
+    def get_next_sibling_text(self, bs:bs4.BeautifulSoup, prev_key:str):
+        node = bs.find(string=re.compile(prev_key))
+        text = (''.join(node.parent.parent.next_sibling.next_sibling.strings)).strip()
+        return text
+HTMLUtil = RakutenPayHTMLMailUtil()
+
+class RakutenPayMailHtml2018(RakutenPayMail):
+    #"：" が無いとHTMLのコメントにマッチして死ぬ…
+    KEYWORD = 'ご利用ポイント上限：'
+
+    def __init__(self, mail_body:str):
+        super().__init__()
+        ND = _normalize_datetime
+        GN = HTMLUtil.get_next_sibling_text
+
+        bs = bs4.BeautifulSoup(mail_body, features='lxml')
+        self.datetime   = ND(GN(bs, 'お申込日：'))
+        self.receipt_no = GN(bs, 'お申込番号：').strip()
+        self.store_name = GN(bs, 'ご利用サイト：')
+        self.store_tel  = ''
+        self.use_point  = GN(bs, 'ご利用ポイント上限：')
+        self.use_cash   = None
+        self.total      = None
+
+    def _get_value(self, bs:bs4.BeautifulSoup, find_text:str):
+        node = bs.find(string=re.compile(find_text))
+        return ''.join(node.parent.parent.next_sibling.next_sibling.strings)
+
 class RakutenPayMailLegacy(RakutenPayMail):
     RE_BODY_EXTRACTOR = re.compile(r"<pre>(.+?)</pre>", re.S)
 
@@ -138,23 +168,23 @@ class RakutenPayMailCurrent(RakutenPayMail):
         super().__init__()
         NY = _normalize_yen
         ND = _normalize_datetime
-        self.bs = bs4.BeautifulSoup(mailBody, features='lxml')
+        GN = HTMLUtil.get_next_sibling_text
+        bs = bs4.BeautifulSoup(mailBody, features='lxml')
 
-        self.datetime   = ND(self._getNextSiblingText('ご注文日：'))
-        self.receipt_no = self._getNextSiblingText('ご注文番号：')
-        self.store_name = self._getNextSiblingText('ご利用サイト：')
+        self.datetime   = ND(GN(bs, 'ご注文日：'))
+        self.receipt_no = GN(bs, 'ご注文番号：')
+        self.store_name = GN(bs, 'ご利用サイト：')
         self.store_tel  = ''
-        self.use_cash   = NY(self._getRightText('ポイント(/キャッシュ)?利用：'))
-        self.total      = NY(self._getRightText('小計：'))
+        self.use_cash   = NY(self._getRightText(bs, 'ポイント(/キャッシュ)?利用：'))
+        self.total      = NY(self._getRightText(bs, '小計：'))
 
-    def _getNextSiblingText(self, prevKey: str):
-        targetNode = self.bs.find(string=re.compile(prevKey))
+    def __get_next_sibling_text(self, bs, prevKey: str):
+        targetNode = bs.find(string=re.compile(prevKey))
         text = (''.join(targetNode.parent.parent.next_sibling.next_sibling.strings)).strip()
         return text
 
-    def _getRightText(self, key: str):
-        # targetNode = self.bs.find(string=re.compile('お支払い金額：'))
-        targetNode = self.bs.find(string=re.compile(key))
+    def _getRightText(self, bs, key: str):
+        targetNode = bs.find(string=re.compile(key))
         text = (''.join(targetNode.parent.next_sibling.next_sibling.strings)).strip()
         return text
 
@@ -165,6 +195,18 @@ class UnexcpectedRakutenPayMailException(Exception):
         self.subject:str   = None
         self.msgid:str     = None
         self.email:Message = None
+
+# === parser ===
+def _parse_mailbody_html(mail_body:str):
+    # if 'お客様のお申込情報を受けた時点で送信される自動配信メール' in mail_body:
+    #    e(f'{filePath} / ignore...')
+    #    wrap = ''
+    if RakutenPayMailHtml2018.KEYWORD in mail_body:
+        return RakutenPayMailHtml2018(mail_body)
+    if RE_PRE_ELEMENT.search(mail_body):
+        return RakutenPayMailLegacy(mail_body)
+    else:
+        return RakutenPayMailCurrent(mail_body)
 
 #=== internal ===
 def _dump_mail(mail_body:str, msgid:str, filename:str, i:int):
@@ -292,13 +334,7 @@ def parse_mailbody(mail_body:str) -> RakutenPayMail:
         Caller must catch exceptions.
     """
     if RE_IS_HTML.search(mail_body):
-        # if 'お客様のお申込情報を受けた時点で送信される自動配信メール' in mail_body:
-        #    e(f'{filePath} / ignore...')
-        #    wrap = ''
-        if RE_PRE_ELEMENT.search(mail_body):
-            return RakutenPayMailLegacy(mail_body)
-        else:
-            return RakutenPayMailCurrent(mail_body)
+        return _parse_mailbody_html(mail_body)
     else:
         return RakutenPayPlainText(mail_body)
 

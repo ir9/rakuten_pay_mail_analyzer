@@ -74,7 +74,7 @@ def parse_mail(bmf_path:str):
                 # remove invalid chars in windows path
                 for c in '\/:*?"<>|':
                     msgid = msgid.replace(c, '')
-                _dump_mail(mail_raw, _dump_exception(ex), "{basename}_{msgid}")
+                _dump_mail(mail_raw, _dump_exception(ex), f"{basename}_{msgid}")
                 continue
     except Exception as ex:
         print(f"{bmf_path}:{msgid}:{ex}")
