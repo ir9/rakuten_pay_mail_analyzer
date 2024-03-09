@@ -233,7 +233,7 @@ def _decode_header(msg:Message, key:str):
             try:
                 return util.decode(body, encode or 'cp932')
             except UnicodeDecodeError:
-                msgid = msg['mesasge-id']
+                msgid = msg['message-id']
                 w(f'Header decode error...:{msgid}:{key}')
                 return util.decode(body, encode or 'cp932', True)
 
