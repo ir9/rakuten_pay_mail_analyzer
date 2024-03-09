@@ -152,28 +152,27 @@ class RakutenPayPlainText(RakutenPayMail):
 
 #=== html mail ===
 class RakutenPayHTMLMailUtil:
-    def get_next_sibling_text(self, bs:bs4.BeautifulSoup, target_regex:str):
-        node = bs.find(string=re.compile(target_regex))
+    def get_next_sibling_text(self, bs:bs4.BeautifulSoup, prev_key:str):
+        node = bs.find(string=re.compile(prev_key))
         text = (''.join(node.parent.parent.next_sibling.next_sibling.strings)).strip()
         return text
 HTMLUtil = RakutenPayHTMLMailUtil()
 
 class RakutenPayMailHtml2018(RakutenPayMail):
     #"：" が無いとHTMLのコメントにマッチして死ぬ…
-    RE_KEYWORD = re.compile('ご利用ポイント(/キャッシュ)?上限：')
+    KEYWORD = 'ご利用ポイント上限：'
 
     def __init__(self, mail_body:str):
         super().__init__()
-        NP = _normalize_point
         ND = _normalize_datetime
         GN = HTMLUtil.get_next_sibling_text
 
-        bs = bs4.BeautifulSoup(mail_body, features='html.parser')
+        bs = bs4.BeautifulSoup(mail_body, features='lxml')
         self.datetime   = ND(GN(bs, 'お申込日：'))
         self.receipt_no = GN(bs, 'お申込番号：').strip()
         self.store_name = GN(bs, 'ご利用サイト：')
         self.store_tel  = ''
-        self.use_point  = NP(GN(bs, 'ご利用ポイント(/キャッシュ)?上限：'))
+        self.use_point  = GN(bs, 'ご利用ポイント上限：')
         self.use_cash   = None
         self.total      = None
 
@@ -216,18 +215,23 @@ class RakutenPayMailCurrent(RakutenPayMail):
         NY = _normalize_yen
         ND = _normalize_datetime
         GN = HTMLUtil.get_next_sibling_text
-        bs = bs4.BeautifulSoup(mail_body, features='html.parser')
+        bs = bs4.BeautifulSoup(mailBody, features='lxml')
 
         self.datetime   = ND(GN(bs, 'ご注文日：'))
         self.receipt_no = GN(bs, 'ご注文番号：')
         self.store_name = GN(bs, 'ご利用サイト：')
         self.store_tel  = ''
-        self.use_cash   = NY(self._get_right_text(bs, 'ポイント(/キャッシュ)?利用：'))
-        self.total      = NY(self._get_right_text(bs, '小計：'))
+        self.use_cash   = NY(self._getRightText(bs, 'ポイント(/キャッシュ)?利用：'))
+        self.total      = NY(self._getRightText(bs, '小計：'))
 
-    def _get_right_text(self, bs, key: str):
-        target_node = bs.find(string=re.compile(key))
-        text = (''.join(target_node.parent.next_sibling.next_sibling.strings)).strip()
+    def __get_next_sibling_text(self, bs, prevKey: str):
+        targetNode = bs.find(string=re.compile(prevKey))
+        text = (''.join(targetNode.parent.parent.next_sibling.next_sibling.strings)).strip()
+        return text
+
+    def _getRightText(self, bs, key: str):
+        targetNode = bs.find(string=re.compile(key))
+        text = (''.join(targetNode.parent.next_sibling.next_sibling.strings)).strip()
         return text
 
 class UnexcpectedRakutenPayMailException(Exception):
@@ -244,7 +248,7 @@ def _parse_mailbody_html(mail_body:str):
     # if 'お客様のお申込情報を受けた時点で送信される自動配信メール' in mail_body:
     #    e(f'{filePath} / ignore...')
     #    wrap = ''
-    if RakutenPayMailHtml2018.RE_KEYWORD.search(mail_body):
+    if RakutenPayMailHtml2018.KEYWORD in mail_body:
         return RakutenPayMailHtml2018(mail_body)
     if RE_PRE_ELEMENT.search(mail_body):
         return RakutenPayMailLegacy(mail_body)
