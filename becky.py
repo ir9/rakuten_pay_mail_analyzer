@@ -1,5 +1,7 @@
 from typing import *
 import sys
+import io
+import csv
 import traceback
 import os.path
 import glob
@@ -18,6 +20,7 @@ def _dump_mail(mail:email.message.Message, msg:str, filename:str):
         print(msg, file=h, end='')
 
 def _dump_exception(ex:r_pay.UnexcpectedRakutenPayMailException):
+    stack_list = (ex.stack_trace_list or []) + [traceback.format_exc()]
     rec = [
         f"from: {ex.from_}",
         f"subject: {ex.subject}",
@@ -25,7 +28,7 @@ def _dump_exception(ex:r_pay.UnexcpectedRakutenPayMailException):
         "",
         f"{ex.mail_body}",
         "--------",
-        traceback.format_exc(),
+        '--------'.join(stack_list),
     ]
     return '\n'.join(rec)
 
@@ -62,17 +65,17 @@ def parse_mail(bmf_path:str):
         for mail_raw in _split_becky_mailfile(bmf_path):
             try:
                 mail  = email.message_from_bytes(mail_raw)
-                msgid = r_pay._decode_header(mail, 'Message-ID')
+                msgid = mail['Message-ID']
 
                 pay_mail = r_pay.parse_email(mail)
                 if pay_mail:
-                    yield (pay_mail, msgid)
+                    yield pay_mail
             except r_pay.UnexcpectedRakutenPayMailException as ex:
                 basename = os.path.basename(bmf_path)
                 w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')
 
                 # remove invalid chars in windows path
-                for c in '\/:*?"<>|':
+                for c in '\\/:*?"<>|':
                     msgid = msgid.replace(c, '')
                 _dump_mail(mail_raw, _dump_exception(ex), f"{basename}_{msgid}")
                 continue
@@ -81,8 +84,11 @@ def parse_mail(bmf_path:str):
         raise
 
 def get_rakuten_pay_mails(mail_box_path:str):
-    for bmf_file in glob.glob('**/*.bmf', root_dir=mail_box_path, recursive=True):
-        # print('.', file=sys.stderr, end='', flush=True)
+    files = glob.glob('**/*.bmf', root_dir=mail_box_path, recursive=True)
+    file_count = len(files)
+    for i, bmf_file in enumerate(files):
+        basename = os.path.basename(bmf_file)
+        print(f'{basename} ({i}/{file_count})', file=sys.stderr, flush=True)
         bmf_path = os.path.join(mail_box_path, bmf_file)
         yield from parse_mail(bmf_path)
 
@@ -95,10 +101,12 @@ def get_cli_option():
 def main():
     opt = get_cli_option()
     mail_box_path = opt.mail_box_path
-    for mail, msgid in get_rakuten_pay_mails(mail_box_path):
-        print(','.join(map(str,
-            [mail.datetime, mail.total, mail.use_point, mail.use_cash, mail.store_name, msgid]
-        )))
+
+    outbuff = io.StringIO()
+    writer  = csv.writer(outbuff, lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
+    writer.writerow(r_pay.RakutenPayMail.CSV_VALUE_HEADER)
+    writer.writerows(mail.csv_rawvalues() for mail in get_rakuten_pay_mails(mail_box_path))
+    print(outbuff.getvalue())
 
 if __name__ == '__main__':
     main()
