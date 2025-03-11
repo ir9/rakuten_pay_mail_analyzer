@@ -184,17 +184,6 @@ def _fitler_idx_entity(entities: List[FolderIdxEntity], since: Optional[datetime
 
     return list(filter(is_include, entities))
 
-def _main():
-    idx_entities = _load_folder_idx('Folder.idx')
-    print(len(idx_entities))
-    idx_entities = _fitler_idx_entity(idx_entities,
-        datetime.datetime(2024, 1, 1),
-        datetime.datetime(2024, 12, 31),
-    )
-    print(len(idx_entities))
-
-_main()
-
 # =====================================
 END_OF_EMAIL = b'\r\n.\r\n'
 END_OF_EMAIL_LENGTH = len(END_OF_EMAIL)
@@ -247,13 +236,14 @@ def parse_mail(bmf_path:str):
 def get_rakuten_pay_mails(mail_box_path:str):
     def enumerate_bmf_files(idx_filepath: str):
         print(f"found: {idx_filepath}", end='', file=sys.stderr)
-        entities = _load_folder_idx(idx_filepath)
+        idx_fullpath = join_path(mail_box_path, idx_filepath)
+        entities = _load_folder_idx(idx_fullpath)
         entities = _fitler_idx_entity(entities, argv.since, argv.until)
-        print(f'/ {len(entities)} entities', file=sys.stderr)
+        print(f' / {len(entities)} entities', file=sys.stderr)
 
-        dir_name          = os.path.dirname(idx_filepath)
+        dir_name          = os.path.dirname(idx_fullpath)
         bmf_filename_list = set(e.dwFileName for e in entities)
-        return [ join_path(dir_name, f"{bmf_filename}.bmf") for bmf_filename in bmf_filename_list ]
+        return [ join_path(mail_box_path, dir_name, f"{bmf_filename}.bmf") for bmf_filename in bmf_filename_list ]
 
     folder_idx_list = glob.glob('**/Folder.idx', root_dir=mail_box_path, recursive=True)
     files           = sum(map(enumerate_bmf_files, folder_idx_list), [])
@@ -268,7 +258,7 @@ def get_rakuten_pay_mails(mail_box_path:str):
 # === main ===
 def get_cli_option():
     p = argparse.ArgumentParser()
-    p.add_argument('mail_box_path', help='specify the directory to *.bmf files.', type=str, required=True)
+    p.add_argument('mail_box_path', help='specify the directory to *.bmf files.', type=str)
     p.add_argument('-s', '--since', help='ex) 2025-01-01', type=str)
     p.add_argument('-u', '--until', help='ex) 2025-01-01', type=str)
     return p.parse_args()

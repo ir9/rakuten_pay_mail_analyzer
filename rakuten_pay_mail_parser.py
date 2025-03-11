@@ -215,7 +215,7 @@ class RakutenPayMailCurrent(RakutenPayMail):
         NY = _normalize_yen
         ND = _normalize_datetime
         GN = HTMLUtil.get_next_sibling_text
-        bs = bs4.BeautifulSoup(mailBody, features='lxml')
+        bs = bs4.BeautifulSoup(mail_body, features='html.parser')
 
         self.datetime   = ND(GN(bs, 'ご注文日：'))
         self.receipt_no = GN(bs, 'ご注文番号：')
