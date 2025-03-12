@@ -220,6 +220,8 @@ def parse_mail(bmf_path:str):
                 pay_mail = r_pay.parse_email(mail)
                 if pay_mail:
                     yield pay_mail
+                    if pay_mail.has_error:
+                        raise r_pay.UnexcpectedRakutenPayMailException() 
             except r_pay.UnexcpectedRakutenPayMailException as ex:
                 basename = os.path.basename(bmf_path)
                 w(f'Unexpected rakute pay mail format:{basename}:{msgid}:{traceback.format_exc()}')

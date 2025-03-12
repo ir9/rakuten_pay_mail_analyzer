@@ -62,7 +62,9 @@ class RakutenPayMail:
         self.use_point:Optional[int]  = None
         self.use_cash:Optional[int]   = None
         self.total:Optional[int]      = None
+        "ポイント/cash を引く前の支払い送金額"
         self.message_id:Optional[str] = None
+        self.has_error = False
 
     def csv_rawvalues(self):
         vals = [
@@ -113,6 +115,10 @@ class RakutenPayPlainText(RakutenPayMail):
     RE_PAY_POINT  = _mk_re("ポイント")
     RE_PAY_CASH   = _mk_re("楽天キャッシュ")
 
+    # 国税
+    RE_PAY_GOV_NAME   = _mk_re("お支払先")
+    RE_PAY_KAZEI_YEAR = _mk_re("課税年度")
+
     def __init__(self, mail_body:str):
         super().__init__()
 
@@ -122,16 +128,27 @@ class RakutenPayPlainText(RakutenPayMail):
         ND = _normalize_datetime
 
         lines = mail_body.split("\n")
+        legacy_mail  = self._is_target_mail(S.RE_PAY_CASH_L,     lines)
+        kokuzei_mail = self._is_target_mail(S.RE_PAY_KAZEI_YEAR, lines)
+
         self.datetime   = ND(R(lines, S.RE_DATETIME))
         self.receipt_no = R(lines, S.RE_RECEIPT_NO)
         self.store_name = R(lines, S.RE_STORE_NAME)
         self.store_tel  = R(lines, S.RE_STORE_TEL)
 
-        legacy_mail = self._is_legacy_mail(lines)
         if legacy_mail:
             self.use_point = 0
             self.use_cash  = NY(R(lines, S.RE_PAY_CASH_L))
             self.total     = NY(R(lines, S.RE_TOTAL))
+        elif kokuzei_mail:
+            gov_name = R(lines, S.RE_PAY_GOV_NAME)
+            year     = R(lines, S.RE_PAY_KAZEI_YEAR)
+            point    = R(lines, S.RE_PAY_POINT)
+
+            self.use_point  = int(point) if point is not None else None
+            self.store_name = f"{gov_name} {year}"
+            self.use_cash   = NY(R(lines, S.RE_PAY_CASH))
+            self.total      = NY(R(lines, S.RE_TOTAL))
         else:
             point          = R(lines, S.RE_PAY_POINT)
             self.use_point = int(point) if point is not None else None
@@ -144,10 +161,11 @@ class RakutenPayPlainText(RakutenPayMail):
             if m:
                 return m.group(1).strip()
         w(f'PlainText:element not found:{regex}')
+        # self.has_error = True
         return None
 
-    def _is_legacy_mail(self, lines:List[str]):
-        search = RakutenPayPlainText.RE_PAY_CASH_L.search
+    def _is_target_mail(self, re_keyword: re.Pattern , lines:List[str]):
+        search = re_keyword.search
         return any(search(line) for line in lines)
 
 #=== html mail ===
@@ -159,6 +177,12 @@ class RakutenPayHTMLMailUtil:
 HTMLUtil = RakutenPayHTMLMailUtil()
 
 class RakutenPayMailHtml2018(RakutenPayMail):
+    """
+    for
+    - html00.html
+    - html01.html ?
+    """
+
     #"：" が無いとHTMLのコメントにマッチして死ぬ…
     KEYWORD = 'ご利用ポイント上限：'
 
@@ -210,6 +234,11 @@ class RakutenPayMailLegacy(RakutenPayMail):
         return value
 
 class RakutenPayMailCurrent(RakutenPayMail):
+    """
+    for
+    - html_current.html
+    - html_current02.html
+    """
     def __init__(self, mail_body: str):
         super().__init__()
         NY = _normalize_yen
@@ -221,13 +250,8 @@ class RakutenPayMailCurrent(RakutenPayMail):
         self.receipt_no = GN(bs, 'ご注文番号：')
         self.store_name = GN(bs, 'ご利用サイト：')
         self.store_tel  = ''
-        self.use_cash   = NY(self._getRightText(bs, 'ポイント(/キャッシュ)?利用：'))
-        self.total      = NY(self._getRightText(bs, '小計：'))
-
-    def __get_next_sibling_text(self, bs, prevKey: str):
-        targetNode = bs.find(string=re.compile(prevKey))
-        text = (''.join(targetNode.parent.parent.next_sibling.next_sibling.strings)).strip()
-        return text
+        self.use_cash   = -NY(self._getRightText(bs, 'ポイント(/キャッシュ)?利用：'))
+        self.total      = NY(self._getRightText(bs, '(小計|ご注文金額)：'))
 
     def _getRightText(self, bs, key: str):
         targetNode = bs.find(string=re.compile(key))
