@@ -16,8 +16,18 @@ import bs4
 import dateutil.parser
 import util
 
+class Mail(NamedTuple):
+    body: str
+    from_: str
+    subject: str
+
 def w(msg):
     print(f"{msg}", file=sys.stderr, flush=True)
+
+V = TypeVar('V')
+D = TypeVar('D')
+def nullcoal(v:Optional[V], d:Optional[D]):
+    return d if v is None else v
 
 # ============================
 # rakuten mail spec
@@ -116,53 +126,81 @@ class RakutenPayPlainText(RakutenPayMail):
     RE_PAY_CASH   = _mk_re("楽天キャッシュ")
 
     # 国税
-    RE_PAY_GOV_NAME   = _mk_re("お支払先")
-    RE_PAY_KAZEI_YEAR = _mk_re("課税年度")
+    RE_PAY_GOV_NAME = _mk_re("お支払先")
+    RE_PAY_GOV_YEAR = _mk_re("課税年度")
 
     def __init__(self, mail_body:str):
         super().__init__()
 
         S  = RakutenPayPlainText
-        R  = self._get_record
         NY = _normalize_yen
         ND = _normalize_datetime
 
-        lines = mail_body.split("\n")
-        legacy_mail  = self._is_target_mail(S.RE_PAY_CASH_L,     lines)
-        kokuzei_mail = self._is_target_mail(S.RE_PAY_KAZEI_YEAR, lines)
+        lines  = mail_body.split("\n")
+        values = self._parse_values(lines)
+        def V(pattern: re.Pattern): # bind 'values'
+            return self._get_value(values, pattern)
+        def VN(pattern: re.Pattern):
+            return values[pattern]
 
-        self.datetime   = ND(R(lines, S.RE_DATETIME))
-        self.receipt_no = R(lines, S.RE_RECEIPT_NO)
-        self.store_name = R(lines, S.RE_STORE_NAME)
-        self.store_tel  = R(lines, S.RE_STORE_TEL)
+        legacy_mail  = values[S.RE_PAY_CASH_L]   is not None
+        kokuzei_mail = values[S.RE_PAY_GOV_YEAR] is not None
 
-        if legacy_mail:
-            self.use_point = 0
-            self.use_cash  = NY(R(lines, S.RE_PAY_CASH_L))
-            self.total     = NY(R(lines, S.RE_TOTAL))
-        elif kokuzei_mail:
-            gov_name = R(lines, S.RE_PAY_GOV_NAME)
-            year     = R(lines, S.RE_PAY_KAZEI_YEAR)
-            point    = R(lines, S.RE_PAY_POINT)
+        self.datetime   = ND(V(S.RE_DATETIME))
+        self.receipt_no = V(S.RE_RECEIPT_NO)
+        self.store_tel  = nullcoal(VN(S.RE_STORE_TEL), '')
 
-            self.use_point  = int(point) if point is not None else None
-            self.store_name = f"{gov_name} {year}"
-            self.use_cash   = NY(R(lines, S.RE_PAY_CASH))
-            self.total      = NY(R(lines, S.RE_TOTAL))
+        point = VN(S.RE_PAY_POINT)
+        point = int(point) if point is not None else None
+
+        if kokuzei_mail:
+            gov_name = V(S.RE_PAY_GOV_NAME)
+            gov_year = nullcoal(VN(S.RE_PAY_GOV_YEAR), '')
+
+            self.use_point  = point
+            self.store_name = ' '.join([gov_name, gov_year]).strip()
+            self.use_cash   = NY(V(S.RE_PAY_CASH))
+            self.total      = NY(V(S.RE_TOTAL))
+        elif legacy_mail:
+            self.use_point  = 0
+            self.store_name = V(S.RE_STORE_NAME)
+            self.use_cash   = NY(V(S.RE_PAY_CASH_L))
+            self.total      = NY(V(S.RE_TOTAL))
         else:
-            point          = R(lines, S.RE_PAY_POINT)
-            self.use_point = int(point) if point is not None else None
-            self.use_cash  = NY(R(lines, S.RE_PAY_CASH))
-            self.total     = NY(R(lines, S.RE_TOTAL))
+            self.use_point  = point
+            self.store_name = V(S.RE_STORE_NAME)
+            self.use_cash   = NY(V(S.RE_PAY_CASH))
+            self.total      = NY(V(S.RE_TOTAL))
+    
+    def _parse_values(self, lines) -> dict[re.Pattern, Optional[str]]:
+        S = RakutenPayPlainText
+        keys = [
+            S.RE_DATETIME,
+            S.RE_RECEIPT_NO,
+            S.RE_STORE_NAME,
+            S.RE_STORE_TEL,
+            S.RE_TOTAL,
+            S.RE_PAY_CASH_L,
+            S.RE_PAY_POINT,
+            S.RE_PAY_CASH,
+            S.RE_PAY_GOV_NAME,
+            S.RE_PAY_GOV_YEAR,            
+        ]
+        def _get_record(regex: re.Pattern) -> Optional[str]:
+            for line in lines:
+                m = regex.search(line)
+                if m:
+                    return m.group(1).strip()
+            return None
 
-    def _get_record(self, lines, regex: re.Pattern):
-        for line in lines:
-            m = regex.search(line)
-            if m:
-                return m.group(1).strip()
-        w(f'PlainText:element not found:{regex}')
-        # self.has_error = True
-        return None
+        return { key : _get_record(key) for key in keys }
+
+    def _get_value(self, dic: Dict[re.Pattern, Optional[str]], pattern: re.Pattern):
+        value = dic[pattern]
+        if value is None:
+            w(f'PlainText:element not found:{pattern}')
+            self.has_error = True
+        return value
 
     def _is_target_mail(self, re_keyword: re.Pattern , lines:List[str]):
         search = re_keyword.search
@@ -258,6 +296,28 @@ class RakutenPayMailCurrent(RakutenPayMail):
         text = (''.join(targetNode.parent.next_sibling.next_sibling.strings)).strip()
         return text
 
+class RakutenPayMailOrderConfirm(RakutenPayMail):
+    """
+    for
+    - order.html
+    """
+    def __init__(self, mail_body: str):
+        super().__init__()
+        NY = _normalize_yen
+        ND = _normalize_datetime
+        GN = HTMLUtil.get_next_sibling_text
+        bs = bs4.BeautifulSoup(mail_body, features='html.parser')
+
+        point = GN(bs, 'ご利用ポイント/キャッシュ上限：')
+        point = point.replace("ポイント", '')
+
+        self.datetime   = ND(GN(bs, 'お申込日：'))
+        self.receipt_no = GN(bs, 'お申込番号：')
+        self.store_name = GN(bs, 'お申込名：')
+        self.store_tel  = ''
+        self.use_cash   = int(point)
+        self.total      = self.use_cash 
+
 class UnexcpectedRakutenPayMailException(Exception):
     def __init__(self):
         self.stack_trace_list:List[Exception] = None
@@ -268,16 +328,23 @@ class UnexcpectedRakutenPayMailException(Exception):
         self.email:Message = None
 
 # === parser ===
-def _parse_mailbody_html(mail_body:str):
+def _parse_mailbody_html(mail:Mail):
     # if 'お客様のお申込情報を受けた時点で送信される自動配信メール' in mail_body:
     #    e(f'{filePath} / ignore...')
     #    wrap = ''
-    if RakutenPayMailHtml2018.KEYWORD in mail_body:
-        return RakutenPayMailHtml2018(mail_body)
-    if RE_PRE_ELEMENT.search(mail_body):
-        return RakutenPayMailLegacy(mail_body)
+    subject = mail.subject
+    from_   = mail.from_
+    def is_order_confirm_mail():
+        return 'order@checkout.rakuten.co.jp' in from_ and '楽天ペイ お申込完了' in subject
+
+    if RakutenPayMailHtml2018.KEYWORD in mail.body:
+        return RakutenPayMailHtml2018(mail.body)
+    elif is_order_confirm_mail():
+        return RakutenPayMailOrderConfirm(mail.body)
+    elif RE_PRE_ELEMENT.search(mail.body):
+        return RakutenPayMailLegacy(mail.body)
     else:
-        return RakutenPayMailCurrent(mail_body)
+        return RakutenPayMailCurrent(mail.body)
 
 #=== internal ===
 def _dump_mail(mail_body:str, msgid:str, filename:str, i:int):
@@ -336,7 +403,7 @@ def _get_mail_body(msg:Message):
 def _content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'
 
-def _get_rakuten_pay_mail_first(msg:Message):
+def _get_rakuten_pay_mail_first(msg:Message, from_:str, subject:str):
     """
     Raises:
         UnexcpectedRakutenPayMailException
@@ -347,7 +414,7 @@ def _get_rakuten_pay_mail_first(msg:Message):
         mail_body = 'decode failed...'
         try:
             mail_body = _get_mail_body(part)
-            return parse_mailbody(mail_body)
+            return parse_mailbody(Mail(mail_body, from_, subject))
         except Exception as ex:
             w(f'unexcepted rakuten pay mail format(1): {msgid}, {ex}, {traceback.format_exc()}')
             stack_trace_list.append(traceback.format_exc())
@@ -365,7 +432,7 @@ def is_rakuten_pay_mail(from_:str, subject:str):
     from_   = from_   or ''
     subject = subject or ''
 
-    if ('order@checkout.rakuten.co.jp' in from_) and ('楽天ペイ お申込完了' not in subject):
+    if ('order@checkout.rakuten.co.jp' in from_):
         return True
     if ('no-reply@pay.rakuten.co.jp' in from_) and ('ご利用内容確認メール' in subject):
         return True
@@ -389,7 +456,7 @@ def parse_email(mail:Message):
             ex = UnexcpectedRakutenPayMailException()
             raise ex
 
-        pay_mail = _get_rakuten_pay_mail_first(mail)
+        pay_mail = _get_rakuten_pay_mail_first(mail, from_, subject)
         pay_mail.message_id = msgid
         return pay_mail
     except UnexcpectedRakutenPayMailException as ex:
@@ -398,21 +465,21 @@ def parse_email(mail:Message):
         ex.msgid   = msgid
         raise
 
-def parse_str(mail_body:str, from_:str, subject:str):
-    if not is_rakuten_pay_mail(from_, subject):
+def parse_str(mail:Mail):
+    if not is_rakuten_pay_mail(mail.from_, mail.subject):
         return None
-    return parse_mailbody(mail_body)
+    return parse_mailbody(mail)
 
-def parse_mailbody(mail_body:str) -> RakutenPayMail:
+def parse_mailbody(mail:Mail) -> RakutenPayMail:
     """
     Raises:
         throw various exceptions....
         Caller must catch exceptions.
     """
-    if RE_IS_HTML.search(mail_body):
-        return _parse_mailbody_html(mail_body)
+    if RE_IS_HTML.search(mail.body):
+        return _parse_mailbody_html(mail)
     else:
-        return RakutenPayPlainText(mail_body)
+        return RakutenPayPlainText(mail.body)
 
 def _main():
     mail_body = ''.join(sys.stdin)
