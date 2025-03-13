@@ -125,6 +125,10 @@ class RakutenPayPlainText(RakutenPayMail):
     RE_PAY_POINT  = _mk_re("ポイント")
     RE_PAY_CASH   = _mk_re("楽天キャッシュ")
 
+    # suicaチャージ
+    RE_SUICA_RECEIPT_NO = _mk_re("Suicaポケット発行依頼ID（伝票番号）")
+    RE_SUICA_AMOUNT     = _mk_re('金額')
+
     # 国税
     RE_PAY_GOV_NAME = _mk_re("お支払先")
     RE_PAY_GOV_YEAR = _mk_re("課税年度")
@@ -145,9 +149,9 @@ class RakutenPayPlainText(RakutenPayMail):
 
         legacy_mail  = values[S.RE_PAY_CASH_L]   is not None
         kokuzei_mail = values[S.RE_PAY_GOV_YEAR] is not None
+        suica_charge_mail = values[S.RE_SUICA_RECEIPT_NO] is not None
 
         self.datetime   = ND(V(S.RE_DATETIME))
-        self.receipt_no = V(S.RE_RECEIPT_NO)
         self.store_tel  = nullcoal(VN(S.RE_STORE_TEL), '')
 
         point = VN(S.RE_PAY_POINT)
@@ -158,16 +162,25 @@ class RakutenPayPlainText(RakutenPayMail):
             gov_year = nullcoal(VN(S.RE_PAY_GOV_YEAR), '')
 
             self.use_point  = point
+            self.receipt_no = V(S.RE_RECEIPT_NO)
             self.store_name = ' '.join([gov_name, gov_year]).strip()
             self.use_cash   = NY(V(S.RE_PAY_CASH))
             self.total      = NY(V(S.RE_TOTAL))
+        elif suica_charge_mail:
+            self.use_point  = ''
+            self.store_name = "Suicaチャージ"
+            self.receipt_no = V(S.RE_SUICA_RECEIPT_NO)
+            self.use_cash   = ''
+            self.total      = NY(V(S.RE_SUICA_AMOUNT))
         elif legacy_mail:
             self.use_point  = 0
+            self.receipt_no = V(S.RE_RECEIPT_NO)
             self.store_name = V(S.RE_STORE_NAME)
             self.use_cash   = NY(V(S.RE_PAY_CASH_L))
             self.total      = NY(V(S.RE_TOTAL))
         else:
             self.use_point  = point
+            self.receipt_no = V(S.RE_RECEIPT_NO)
             self.store_name = V(S.RE_STORE_NAME)
             self.use_cash   = NY(V(S.RE_PAY_CASH))
             self.total      = NY(V(S.RE_TOTAL))
@@ -183,6 +196,8 @@ class RakutenPayPlainText(RakutenPayMail):
             S.RE_PAY_CASH_L,
             S.RE_PAY_POINT,
             S.RE_PAY_CASH,
+            S.RE_SUICA_RECEIPT_NO,
+            S.RE_SUICA_AMOUNT,            
             S.RE_PAY_GOV_NAME,
             S.RE_PAY_GOV_YEAR,            
         ]
@@ -434,7 +449,7 @@ def is_rakuten_pay_mail(from_:str, subject:str):
 
     if ('order@checkout.rakuten.co.jp' in from_):
         return True
-    if ('no-reply@pay.rakuten.co.jp' in from_) and ('ご利用内容確認メール' in subject):
+    if ('no-reply@pay.rakuten.co.jp' in from_):
         return True
     return False
 
