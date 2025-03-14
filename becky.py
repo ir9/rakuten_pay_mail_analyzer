@@ -279,10 +279,15 @@ def main():
     global argv
     argv = CLIParameter(mail_box_path, date_since, date_until)
 
+    rakuten_pay_mail_list = sorted(
+        get_rakuten_pay_mails(mail_box_path),
+        key=lambda r: r.datetime
+    )
+
     outbuff = io.StringIO()
     writer  = csv.writer(outbuff, lineterminator='\n', quoting=csv.QUOTE_NONNUMERIC)
     writer.writerow(r_pay.RakutenPayMail.CSV_VALUE_HEADER)
-    writer.writerows(mail.csv_rawvalues() for mail in get_rakuten_pay_mails(mail_box_path))
+    writer.writerows(mail.csv_rawvalues() for mail in rakuten_pay_mail_list)
     print(outbuff.getvalue())
 
 if __name__ == '__main__':
