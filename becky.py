@@ -8,6 +8,7 @@ import os.path
 import glob
 import argparse
 import contextlib
+import pdb
 import email
 import email.message
 
@@ -173,8 +174,7 @@ def _load_folder_idx(folder_idx_path:str):
                 s(cells[17]), # str #テンポラリ文字列（内容は不定、通常空）
                 decode(cells[18], char_set) # str # (v2.05より）添付ファイルを別ファイルに保存している場合
             )
-        except:
-            import pdb
+        except Exception as ex:
             e(f'unexpected exception! : file={folder_idx_path} / lineNo:{lineNo}')
             pdb.set_trace()
             raise
