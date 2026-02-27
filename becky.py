@@ -45,6 +45,9 @@ def _dump_exception(ex:r_pay.UnexcpectedRakutenPayMailException):
 def w(msg:str):
     print(f"{msg}", file=sys.stderr)
 
+def e(msg:str):
+    print(f"{msg}", file=sys.stderr)
+
 # =====================================
 # for Folder.idx
 # =====================================
@@ -96,7 +99,7 @@ class FolderIdxEntity(NamedTuple):
     strSubject: str #メールの件名
     strFrom: str #メールの差出人
     strTo: str #メールの宛先
-    strMsgId: str #メールのMessage-Idフィールド
+    strMsgId: str | bytes #メールのMessage-Idフィールド
     strReferences: str #メールの参照先のMessage-Id（In-Reply-To,: int #Referenceフィールドから取得）
     tSend: datetime.datetime #メールの送信日時（C言語のtime_t値）（Dateフィールドより取得）
     tRecv: datetime.datetime #メールの配信日時（C言語のtime_t値）（Received: int #フィールドより取得）
@@ -117,6 +120,13 @@ def _load_folder_idx(folder_idx_path:str):
 
     def s(b:bytes, encoding='ascii'):
         return b.decode(encoding)
+
+    def sb(b:bytes, encoding='ascii'):
+        try:
+            return b.decode(encoding)
+        except UnicodeDecodeError as ex:
+            w('unicode decode error:' + str(ex))
+            return b
     
     def to_date(b:bytes):
         num = int(b, 16)
@@ -135,37 +145,43 @@ def _load_folder_idx(folder_idx_path:str):
                     return s.decode(charset)
             raise
 
-    def _parse(line:bytes):
-        cells = line.split(b'\x01')
-        char_set = s(cells[16]) # str #このメールのキャラクタセット（空でも可）
+    def _parse(line:bytes, lineNo:int):
+        try:
+            cells = line.split(b'\x01')
+            char_set = s(cells[16]) # str #このメールのキャラクタセット（空でも可）
 
-        # print(len(cells))
-        # print(cells)
-        return FolderIdxEntity(
-            int(cells[0], 16),  # int  #このメールアイテムのbmfファイル中の先頭からの位置
-            s(cells[1]), # str    #このメールアイテムをフォルダ中でユニークに識別する為のDWORD値,
-            s(cells[2]), # str # bmfファイルのファイル名部分,
-            decode(cells[3], char_set), # str #メールの件名
-            decode(cells[4], char_set), # str #メールの差出人
-            decode(cells[5], char_set), # str #メールの宛先
-            s(cells[6]), # str #メールのMessage-Idフィールド
-            s(cells[7]), # str #メールの参照先のMessage-Id（In-Reply-To, Referenceフィールドから取得）
-            to_date(cells[8]),  # datetime.datetime #メールの送信日時（C言語のtime_t値）（Dateフィールドより取得）
-            to_date(cells[9]),  # datetime.datetime #メールの配信日時（C言語のtime_t値）（Received フィールドより取得）
-            to_date(cells[10]), # datetime.datetime #メールの受信日時（C言語のtime_t値）（受信時に決定）
-            int(cells[11], 16), # int #メールのサイズ（バイト数）
-            s(cells[12]), # int #メールのステータスフラグ
-            s(cells[13]), # str #カラーラベルのCOLORREF値
-            int(cells[14]), # int #５段階の重要度
-            s(cells[15]), # str #スレッド表示の際の親アイテムのdwMsgID
-            char_set, #cells[16], # str #このメールのキャラクタセット（空でも可）
-            s(cells[17]), # str #テンポラリ文字列（内容は不定、通常空）
-            decode(cells[18], char_set) # str # (v2.05より）添付ファイルを別ファイルに保存している場合
-        )
+            # print(len(cells))
+            # print(cells)
+            return FolderIdxEntity(
+                int(cells[0], 16),  # int  #このメールアイテムのbmfファイル中の先頭からの位置
+                s(cells[1]), # str    #このメールアイテムをフォルダ中でユニークに識別する為のDWORD値,
+                s(cells[2]), # str # bmfファイルのファイル名部分,
+                decode(cells[3], char_set), # str #メールの件名
+                decode(cells[4], char_set), # str #メールの差出人
+                decode(cells[5], char_set), # str #メールの宛先
+                sb(cells[6]), # str #メールのMessage-Idフィールド
+                s(cells[7]), # str #メールの参照先のMessage-Id（In-Reply-To, Referenceフィールドから取得）
+                to_date(cells[8]),  # datetime.datetime #メールの送信日時（C言語のtime_t値）（Dateフィールドより取得）
+                to_date(cells[9]),  # datetime.datetime #メールの配信日時（C言語のtime_t値）（Received フィールドより取得）
+                to_date(cells[10]), # datetime.datetime #メールの受信日時（C言語のtime_t値）（受信時に決定）
+                int(cells[11], 16), # int #メールのサイズ（バイト数）
+                s(cells[12]), # int #メールのステータスフラグ
+                s(cells[13]), # str #カラーラベルのCOLORREF値
+                int(cells[14]), # int #５段階の重要度
+                s(cells[15]), # str #スレッド表示の際の親アイテムのdwMsgID
+                char_set, #cells[16], # str #このメールのキャラクタセット（空でも可）
+                s(cells[17]), # str #テンポラリ文字列（内容は不定、通常空）
+                decode(cells[18], char_set) # str # (v2.05より）添付ファイルを別ファイルに保存している場合
+            )
+        except:
+            import pdb
+            e(f'unexpected exception! : file={folder_idx_path} / lineNo:{lineNo}')
+            pdb.set_trace()
+            raise
 
     idx_file = _load()
     lines = idx_file.splitlines()
-    return [ _parse(line) for line in lines[1:] ]
+    return [ _parse(line, i) for i, line in enumerate(lines[1:]) ]
 
 def _fitler_idx_entity(entities: List[FolderIdxEntity], since: Optional[datetime.datetime], until: Optional[datetime.datetime]):
     if since is None and until is None:
