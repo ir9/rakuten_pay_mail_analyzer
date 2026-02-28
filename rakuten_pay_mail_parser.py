@@ -383,13 +383,13 @@ def _decode_header(msg:Message, key:str):
 
         if encode in (None, 'unknown-8bit'):
             encode = msg.get_content_charset() # use the mail charset
-            if encode is None:
-                encode = 'cp932'
+        if encode is None:
+            encode = 'cp932'
+        # remove RFC2231 style annotation
+        aster = encode.find('*')
+        if aster >= 0:
+            encode = encode[:aster]
 
-            # remove RFC2231 style annotation
-            aster = encode.find('*')
-            if aster >= 0:
-                encode = encode[:aster]
         try:
             return util.decode(body, encode)
         except UnicodeDecodeError:
