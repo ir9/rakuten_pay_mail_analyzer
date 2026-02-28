@@ -269,7 +269,7 @@ def get_rakuten_pay_mails(mail_box_path:str):
 
         dir_name          = os.path.dirname(idx_fullpath)
         bmf_filename_list = set(e.dwFileName for e in entities)
-        return [ join_path(mail_box_path, dir_name, f"{bmf_filename}.bmf") for bmf_filename in bmf_filename_list ]
+        return [ join_path(mail_box_path, dir_name, f"{bmf_filename:>08}.bmf") for bmf_filename in bmf_filename_list ]
 
     folder_idx_list = glob.glob('**/Folder.idx', root_dir=mail_box_path, recursive=True)
     files           = sum(map(enumerate_bmf_files, folder_idx_list), [])
