@@ -379,12 +379,19 @@ def _decode_header(msg:Message, key:str):
         body, encode = seg
         # print(f"{body}:{encode}:{mail_charset}:{mail_content_type}", file=sys.stderr)
         if isinstance(body, str):
-            return body
+            return body        
 
         if encode in (None, 'unknown-8bit'):
             encode = msg.get_content_charset() # use the mail charset
+            if encode is None:
+                encode = 'cp932'
+
+            # remove RFC2231 style annotation
+            aster = encode.find('*')
+            if aster >= 0:
+                encode = encode[:aster]
         try:
-            return util.decode(body, encode or 'cp932')
+            return util.decode(body, encode)
         except UnicodeDecodeError:
             msgid = msg['message-id']
             w(f'Header decode error...:{msgid}:{key}')
