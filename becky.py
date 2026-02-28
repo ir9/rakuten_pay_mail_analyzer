@@ -255,6 +255,8 @@ def parse_mail(bmf_path:str):
                     msgid = msgid.replace(c, '')
                 _dump_mail(mail_raw, _dump_exception(ex), f"{basename}_{msgid}")
                 continue
+    except FileNotFoundError:
+        w(f'bmf file not found...: {bmf_path}')
     except Exception as ex:
         print(f"{bmf_path}:{msgid}:{ex}")
         raise
