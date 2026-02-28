@@ -97,9 +97,9 @@ class FolderIdxEntity(NamedTuple):
     dwBodyPtr: int  #このメールアイテムのbmfファイル中の先頭からの位置
     dwMsgID: str    #このメールアイテムをフォルダ中でユニークに識別する為のDWORD値
     dwFileName: str # bmfファイルのファイル名部分
-    strSubject: str #メールの件名
-    strFrom: str #メールの差出人
-    strTo: str #メールの宛先
+    strSubject: str | bytes  #メールの件名
+    strFrom: str | bytes #メールの差出人
+    strTo: str | bytes #メールの宛先
     strMsgId: str | bytes #メールのMessage-Idフィールド
     strReferences: str #メールの参照先のMessage-Id（In-Reply-To,: int #Referenceフィールドから取得）
     tSend: datetime.datetime #メールの送信日時（C言語のtime_t値）（Dateフィールドより取得）
@@ -110,9 +110,9 @@ class FolderIdxEntity(NamedTuple):
     nColor: str #カラーラベルのCOLORREF値
     nPriority: int #５段階の重要度
     dwParentID: str #スレッド表示の際の親アイテムのdwMsgID
-    strCharSet: str #このメールのキャラクタセット（空でも可）
+    strCharSet: str | None #このメールのキャラクタセット（空でも可）
     str_: str #テンポラリ文字列（内容は不定、通常空）
-    strExtAtch: str # (v2.05より）添付ファイルを別ファイルに保存している場合
+    strExtAtch: str | bytes # (v2.05より）添付ファイルを別ファイルに保存している場合
 
 def _load_folder_idx(folder_idx_path:str):
     def _load():
@@ -136,20 +136,28 @@ def _load_folder_idx(folder_idx_path:str):
     DECODE_MAP = {
         'iso-2022-jp': 'cp932',
     }
-    def decode(s: bytes, encoding:str):
-        charset = DECODE_MAP.get(encoding.lower(), encoding)
+    def decode(s: bytes, encoding:str | None):
         try:
+            if encoding is None:
+                raise LookupError("encoding is null")
+            charset = DECODE_MAP.get(encoding.lower(), encoding)
             return s.decode(charset, errors='ignore')
-        except LookupError as ex:
-            for charset in ['cp932', 'utf-8']:
-                with contextlib.suppress(UnicodeDecodeError):
-                    return s.decode(charset)
-            raise
+        except LookupError:
+            w(f'unknown encoding : {encoding}')
+            for charset in ['cp932', 'iso2022-jp', 'euc-jp', 'utf-8']:
+                try:
+                    ret = s.decode(charset)
+                    w(f'using: {charset}')
+                    return ret
+                except UnicodeDecodeError:
+                    continue
+            return s
 
     def _parse(line:bytes, lineNo:int):
         try:
             cells = line.split(b'\x01')
-            char_set = s(cells[16]) # str #このメールのキャラクタセット（空でも可）
+            # str #このメールのキャラクタセット（空でも可）
+            char_set = s(cells[16]) if cells[16] else None
 
             # print(len(cells))
             # print(cells)
