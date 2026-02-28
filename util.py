@@ -20,8 +20,12 @@ decode_iso2022jp = _decode_iso2022jp_nkf
 if sys.platform == 'win32':
     decode_iso2022jp = _decode_iso2022jp_win
 
+ENCODING_ALIAS_MAP = {
+    'windows-874': 'cp874',
+}
 DECODER_MEMO = {}
 def decode(b:bytes, encoding:str, ignore_error=False):
+    encoding = ENCODING_ALIAS_MAP.get(encoding, encoding)
     name = DECODER_MEMO.get(encoding)
     if name is None:
         c = codecs.lookup(encoding)
