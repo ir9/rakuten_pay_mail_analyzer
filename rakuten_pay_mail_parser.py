@@ -456,8 +456,9 @@ def is_rakuten_pay_mail(from_:str, subject:str):
     from_   = from_   or ''
     subject = subject or ''
 
-    parsed = email.utils.getaddresses([from_])
-    from_ = parsed[0][1]
+    if from_:
+        parsed = email.utils.getaddresses([from_])
+        from_ = parsed[0][1]
 
     def is_rakuten_pay_mail_address():
         print(from_)
