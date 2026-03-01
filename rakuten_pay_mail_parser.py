@@ -9,6 +9,7 @@ import quopri
 import base64
 import datetime as dt
 import email
+import email.utils
 import email.header
 from   email.message import Message
 
@@ -155,7 +156,7 @@ class RakutenPayPlainText(RakutenPayMail):
         self.store_tel  = nullcoal(VN(S.RE_STORE_TEL), '')
 
         point = VN(S.RE_PAY_POINT)
-        point = int(point) if point is not None else None
+        point = NY(point) if point is not None else None
 
         if kokuzei_mail:
             gov_name = V(S.RE_PAY_GOV_NAME)
@@ -436,6 +437,7 @@ def _get_rakuten_pay_mail_first(msg:Message, from_:str, subject:str):
         mail_body = 'decode failed...'
         try:
             mail_body = _get_mail_body(part)
+            print(mail_body)
             return parse_mailbody(Mail(mail_body, from_, subject))
         except Exception as ex:
             w(f'unexcepted rakuten pay mail format(1): {msgid}, {ex}, {traceback.format_exc()}')
@@ -454,11 +456,29 @@ def is_rakuten_pay_mail(from_:str, subject:str):
     from_   = from_   or ''
     subject = subject or ''
 
-    if ('order@checkout.rakuten.co.jp' in from_):
-        return True
-    if ('no-reply@pay.rakuten.co.jp' in from_):
-        return True
-    return False
+    parsed = email.utils.getaddresses([from_])
+    from_ = parsed[0][1]
+
+    def is_rakuten_pay_mail_address():
+        print(from_)
+        return from_ in [
+            'order@checkout.rakuten.co.jp',
+            'no-reply@pay.rakuten.co.jp'
+        ]
+
+    def is_ignore_mail():
+        return subject in  [
+            "お支払元登録完了のお知らせ"
+        ]
+
+    if not is_rakuten_pay_mail_address():
+        print(1)
+        return False
+    if is_ignore_mail():
+        print(2)
+        return False
+
+    return True
 
 def parse_email(mail:Message):
     """
@@ -469,8 +489,9 @@ def parse_email(mail:Message):
     subject = _decode_header(mail, 'subject')
     from_   = _decode_header(mail, 'from')
     msgid   = _decode_header(mail, 'Message-Id')
-    # print(f"{from_} / {subject}")
+    print(f"{from_} / {subject}")
     if not is_rakuten_pay_mail(from_, subject):
+        print("aaa")
         return None
 
     try:
@@ -504,9 +525,11 @@ def parse_mailbody(mail:Mail) -> RakutenPayMail:
         return RakutenPayPlainText(mail.body)
 
 def _main():
+    import email
     mail_body = ''.join(sys.stdin)
-    result = parse_mailbody(mail_body)
-    print(result)
+    mail = email.message_from_string(mail_body)
+    r_mail = parse_email(mail)
+    print(r_mail.csv())
 
 if __name__ == '__main__':
     _main()
