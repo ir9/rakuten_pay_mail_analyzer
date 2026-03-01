@@ -423,6 +423,9 @@ def _get_mail_body(msg:Message):
         w(f'mailbody decode error...:{msgid}:{charset}:{trans_encoding}')
         return util.decode(body, charset, True)
 
+def _content_type_is_text_html(part:Message):
+    return part.get_content_type() == 'text/html'
+
 def _content_type_is_text_plain(part:Message):
     return part.get_content_type() == 'text/plain'
 
@@ -433,16 +436,17 @@ def _get_rakuten_pay_mail_first(msg:Message, from_:str, subject:str):
     """
     stack_trace_list = []
     msgid = _decode_header(msg, 'Message-ID')
-    for part in filter(_content_type_is_text_plain, msg.walk()):
-        mail_body = 'decode failed...'
-        try:
-            mail_body = _get_mail_body(part)
-            print(mail_body)
-            return parse_mailbody(Mail(mail_body, from_, subject))
-        except Exception as ex:
-            w(f'unexcepted rakuten pay mail format(1): {msgid}, {ex}, {traceback.format_exc()}')
-            stack_trace_list.append(traceback.format_exc())
-            continue
+    for content_type_filter_func in [_content_type_is_text_html, _content_type_is_text_plain]:
+        for part in filter(content_type_filter_func, msg.walk()):
+            mail_body = 'decode failed...'
+            try:
+                mail_body = _get_mail_body(part)
+                # print(mail_body)
+                return parse_mailbody(Mail(mail_body, from_, subject))
+            except Exception as ex:
+                w(f'unexcepted rakuten pay mail format(1): {msgid}, {ex}, {traceback.format_exc()}')
+                stack_trace_list.append(traceback.format_exc())
+                continue
 
     w(f'unexcepted rakuten pay mail format(2): {msgid}')
     ex = UnexcpectedRakutenPayMailException()
@@ -461,7 +465,6 @@ def is_rakuten_pay_mail(from_:str, subject:str):
         from_ = parsed[0][1]
 
     def is_rakuten_pay_mail_address():
-        print(from_)
         return from_ in [
             'order@checkout.rakuten.co.jp',
             'no-reply@pay.rakuten.co.jp'
