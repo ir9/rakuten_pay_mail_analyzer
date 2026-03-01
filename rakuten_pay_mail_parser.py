@@ -473,10 +473,8 @@ def is_rakuten_pay_mail(from_:str, subject:str):
         ]
 
     if not is_rakuten_pay_mail_address():
-        print(1)
         return False
     if is_ignore_mail():
-        print(2)
         return False
 
     return True
@@ -490,9 +488,8 @@ def parse_email(mail:Message):
     subject = _decode_header(mail, 'subject')
     from_   = _decode_header(mail, 'from')
     msgid   = _decode_header(mail, 'Message-Id')
-    print(f"{from_} / {subject}")
+    # print(f"{from_} / {subject}")
     if not is_rakuten_pay_mail(from_, subject):
-        print("aaa")
         return None
 
     try:
